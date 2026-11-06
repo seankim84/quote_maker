@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from core import config, extract, matching, sheets
+from core import config, extract, matching, pricing, sheets
 
 st.set_page_config(page_title="AI Quote Factory", page_icon="📄", layout="wide")
 
@@ -224,9 +224,64 @@ elif page == "New Quotation":
 
         if pending:
             st.warning(f"**{len(pending)}건이 미확정입니다.** 상품을 고르거나 확인해야 "
-                       f"다음 단계(가격 계산)로 넘어갈 수 있습니다.")
+                       f"금액을 계산할 수 있습니다.")
+
+        st.divider()
+        st.subheader("4. 고객 선택 · 금액 계산")
+
+        customers = data.customers
+        labels = [f"{r.company_name} · {r.customer_tier} · 할인 {r.discount_rate:.0%}"
+                  for r in customers.itertuples()]
+        picked = st.selectbox("거래처", ["(선택하세요)"] + labels, key="customer")
+        customer = None if picked == "(선택하세요)" else customers.iloc[labels.index(picked)]
+
+        if customer is None:
+            st.info("거래처를 선택하면 등급 할인이 적용된 금액을 계산합니다.")
+        elif pending:
+            st.caption("미확정 상품을 먼저 처리하세요.")
         else:
-            st.success("모든 상품이 확정되었습니다. 다음 단계(6단계)에서 금액을 계산합니다.")
+            try:
+                quote = pricing.calculate(
+                    pricing.rows_from_matches(resolved),
+                    discount_rate=customer.discount_rate,
+                    tax_rate=data.settings["tax_rate"],
+                    currency=data.settings["default_currency"],
+                )
+            except pricing.PricingError as e:
+                st.session_state.pop("quote", None)
+                st.error(f"**금액을 계산할 수 없습니다** — {e}")
+            else:
+                st.session_state["quote"] = quote
+                st.session_state["quote_customer"] = customer.to_dict()
+
+                st.dataframe(
+                    [{"상품명": l.product_name, "수량": f"{l.quantity:,}",
+                      "단가 (세전)": f"{l.unit_price:,}",
+                      "금액 (세전)": f"{l.line_total:,}"} for l in quote.lines],
+                    hide_index=True, width="stretch")
+
+                money = [("소계 (세전)", quote.subtotal),
+                         (f"할인 ({quote.discount_rate:.0%}, {customer.customer_tier})",
+                          -quote.discount),
+                         ("과세 대상", quote.taxable),
+                         (f"VAT ({quote.tax_rate:.0%})", quote.tax)]
+                left, right = st.columns([2, 1])
+                with right:
+                    for label, amount in money:
+                        st.write(f"{label}  \n**{amount:,} {quote.currency}**")
+                    st.divider()
+                    st.metric("최종 견적 금액", f"{quote.total:,} {quote.currency}")
+                with left:
+                    st.caption(
+                        "계산 순서: 상품별 합계 → 소계 → **할인** → 과세 대상 → **세금** → 최종 금액. "
+                        "할인을 먼저 적용하고 할인된 금액에 세금을 매깁니다.\n\n"
+                        "모든 단가는 **세전**이며, 금액은 전부 파이썬이 계산합니다 "
+                        "(Claude 는 숫자를 만지지 않습니다). VND 는 소수점이 없어 "
+                        "할인·세금은 정수로 반올림합니다(0.5 는 올림).")
+                    if short:
+                        st.warning(f"⚠️ 이 견적에는 재고가 부족한 상품이 {len(short)}건 "
+                                   f"포함돼 있습니다. 견적서에도 표시됩니다.")
+                st.caption("다음 단계(7단계)에서 수량·단가·할인율을 직접 수정할 수 있게 만듭니다.")
 
 elif page == "Product Search":
     st.header("Product Search")
