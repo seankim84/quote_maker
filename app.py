@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pandas as pd
 import streamlit as st
 
-from core import config, extract, matching, pricing, sheets
+from core import config, email_draft, extract, matching, pdf, pricing, sheets
 
 st.set_page_config(page_title="AI Quote Factory", page_icon="📄", layout="wide")
 
@@ -129,7 +129,7 @@ elif page == "New Quotation":
         "matches" in st.session_state and not matching.unresolved(st.session_state["matches"]),
         "quote_customer" in st.session_state,
         "quote" in st.session_state,
-        False,
+        "pdf_bytes" in st.session_state,
     ]
     st.caption(" → ".join(f"{'✅' if ok else '⬜'} {name}"
                           for ok, name in zip(stage_done, stages)))
@@ -355,7 +355,8 @@ elif page == "New Quotation":
                     if st.session_state["quote_meta"]["unmatched"]:
                         st.error("확인 필요 상품이 견적에서 빠졌습니다: "
                                  + ", ".join(st.session_state["quote_meta"]["unmatched"]))
-                    st.caption("다음 단계(8단계)에서 이 내용으로 PDF 견적서와 이메일 초안을 만듭니다.")
+                    st.caption("**Quotation Preview** 화면에서 PDF 견적서와 이메일 초안을 "
+                               "만들 수 있습니다.")
 
 elif page == "Product Search":
     st.header("Product Search")
@@ -374,7 +375,71 @@ elif page == "Product Search":
         else:
             st.info("찾지 못했습니다. 영어 품명으로 검색해 보세요 (시트의 상품명이 영어입니다).")
 
-else:
-    st.header(page)
-    st.info("아직 구현 전입니다. 다음 단계에서 채웁니다.")
-    st.caption("8단계: PDF 미리보기·다운로드, 이메일 초안")
+else:   # Quotation Preview
+    st.header("Quotation Preview")
+    quote = st.session_state.get("quote")
+    customer = st.session_state.get("quote_customer")
+    meta = st.session_state.get("quote_meta")
+
+    if not (quote and customer and meta):
+        st.info("먼저 **New Quotation** 화면에서 견적을 만들고 거래처를 선택하세요.")
+        st.stop()
+
+    number = st.session_state.setdefault("quote_number", pdf.quote_number())
+    c1, c2, c3 = st.columns(3)
+    c1.metric("견적 번호", number)
+    c2.metric("고객사", customer["company_name"])
+    c3.metric("최종 금액", f"{quote.total:,} {quote.currency}")
+    st.caption("견적 번호는 1단계에서는 데모용입니다 (끝 4자리가 난수라 드물게 중복될 수 있음). "
+               "2단계에서 DB 기반 고유 번호로 바꿉니다.")
+
+    st.divider()
+    st.subheader("PDF 견적서")
+    try:
+        # 변수명을 data 로 쓰면 시트 데이터(data)를 덮어씁니다
+        pdf_bytes = pdf.build(quote, customer, data.settings, meta, number=number)
+    except pdf.FontError as e:
+        st.error(f"**폰트 문제로 PDF 를 만들 수 없습니다** — {e}")
+    except Exception as e:
+        st.error(f"**PDF 생성 실패** — {type(e).__name__}: {e}")
+    else:
+        st.session_state["pdf_bytes"] = pdf_bytes
+        st.download_button(
+            "⬇️ 견적서 PDF 다운로드", data=pdf_bytes,
+            file_name=f"Quotation_{number}_{customer['company_name'][:20]}.pdf",
+            mime="application/pdf", type="primary")
+        st.caption(f"{len(pdf_bytes):,} bytes · 폰트 `{pdf.find_font().name}` "
+                   f"(한글·베트남어·영문 포함)")
+        for s_ in meta.get("shortages") or []:
+            st.warning(f"⚠️ 견적서에 재고 부족이 명시됩니다: {s_['product_name']} "
+                       f"{s_['shortage']:,}개 부족")
+        if meta.get("unmatched"):
+            st.error("견적서에 '확인 필요' 로 명시됩니다: " + ", ".join(meta["unmatched"]))
+
+    st.divider()
+    st.subheader("고객 이메일 초안")
+    st.caption("이 단계에서는 **발송하지 않습니다.** 초안을 만들어 복사해 쓰세요.")
+    lang_label = st.radio("언어", list(email_draft.LANGUAGES.values()), horizontal=True)
+    language = next(k for k, v in email_draft.LANGUAGES.items() if v == lang_label)
+
+    if st.button("✉️ 이메일 초안 만들기"):
+        try:
+            with st.spinner("초안을 작성하는 중…"):
+                st.session_state["draft"] = email_draft.generate(
+                    quote, customer, data.settings, meta, number, language)
+        except email_draft.DraftError as e:
+            st.session_state.pop("draft", None)
+            st.error(str(e))
+
+    draft = st.session_state.get("draft")
+    if draft:
+        if draft.source == "mock":
+            st.warning("🧪 **Mock 초안입니다.** 고정 템플릿으로 만들었습니다. "
+                       "실제 Claude 가 쓴 문장이 아닙니다.")
+        else:
+            st.success(f"🟢 Claude API ({email_draft.MODEL}) 가 작성한 초안 "
+                       f"· {email_draft.LANGUAGES[draft.language]}")
+        st.text_input("제목", value=draft.subject, key="draft_subject")
+        st.text_area("본문", value=draft.body, height=420, key="draft_body")
+        st.caption("납기 미확정 문구는 AI 출력과 별개로 항상 자동 삽입됩니다. "
+                   "보내기 전에 반드시 내용을 검토하세요.")
