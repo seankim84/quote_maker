@@ -25,11 +25,13 @@ PAGES = ["Dashboard", "New Quotation", "Product Search", "Quotation Preview",
          "Settings / Connection"]
 
 
-STOCK_LABEL = {
-    matching.STOCK_OK: "✅ 정상",
-    matching.STOCK_SHORT: "⚠️ 재고 부족",
-    matching.STOCK_OUT: "🔴 품절",
-    matching.STOCK_UNKNOWN: "❓ 확인 필요",
+# 상태는 이모지가 아니라 색 배지로 표시합니다.
+# 이모지는 OS 마다 다른 그림으로 그려져 화면이 제각각이 됩니다.
+STOCK_BADGE = {
+    matching.STOCK_OK: ":green-badge[재고 정상]",
+    matching.STOCK_SHORT: ":orange-badge[재고 부족]",
+    matching.STOCK_OUT: ":red-badge[품절]",
+    matching.STOCK_UNKNOWN: ":gray-badge[확인 필요]",
 }
 
 
@@ -70,21 +72,19 @@ def load_sheet():
 
 
 with st.sidebar:
-    st.title("📄 AI Quote Factory")
+    st.title("AI Quote Factory")
     st.caption("B2B 견적서 자동 생성 (1단계)")
     page = st.radio("메뉴", PAGES, label_visibility="collapsed")
     st.divider()
-    if config.mock_mode():
-        st.warning("🧪 Mock 모드\nClaude API 를 호출하지 않습니다.")
-    else:
-        st.success("🟢 실제 Claude API 연결")
+    st.caption(":orange-badge[Mock 모드]  Claude API 를 호출하지 않습니다."
+               if config.mock_mode() else ":green-badge[Claude API 연결됨]")
     if not config.mock_mode():
         lim = quota.limits_from_env()
         if lim.per_session or lim.per_day:
             st.caption(f"AI 호출 — 이 세션 {st.session_state.get('ai_calls', 0)}"
                        f"/{lim.per_session or '∞'} · 오늘 전체 "
                        f"{day_counter().current()}/{lim.per_day or '∞'}")
-    if st.button("🔄 시트 새로 읽기", width="stretch"):
+    if st.button("시트 새로 읽기", width="stretch"):
         load_sheet.clear()
         st.rerun()
 
@@ -101,7 +101,7 @@ if sheet_error and page != "Settings / Connection":
     st.stop()
 
 if data and data.warnings:
-    with st.expander(f"⚠️ 시트 데이터 경고 {len(data.warnings)}건 — 일부 행을 건너뛰었습니다", expanded=True):
+    with st.expander(f"시트 데이터 경고 {len(data.warnings)}건 — 일부 행을 건너뛰었습니다", expanded=True):
         for w in data.warnings:
             st.write("•", w)
 
@@ -110,7 +110,8 @@ if page == "Dashboard":
     active = data.products[data.products["active"]]
     out_of_stock = active[active["stock_quantity"] == 0]
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("판매 상품", f"{len(active)}종", f"단종 {len(data.products) - len(active)}종")
+    c1.metric("판매 상품", f"{len(active)}종",
+              f"단종 {len(data.products) - len(active)}종", delta_color="off")
     c2.metric("품절", f"{len(out_of_stock)}종")
     c3.metric("거래처", f"{len(data.customers)}곳")
     c4.metric("세율 (VAT)", f"{float(data.settings['tax_rate']):.0%}")
@@ -125,7 +126,7 @@ if page == "Dashboard":
                              "category": "분류", "unit_price": "단가 (VND, 세전)",
                              "stock_quantity": "재고"})
             .style.format({"단가 (VND, 세전)": "{:,.0f}", "재고": "{:,.0f}"}),
-            hide_index=True, width="stretch", height=360,
+            hide_index=True, width="stretch", height=380,
         )
         st.caption("※ 모든 단가는 **세전** 금액입니다. 원가(cost_price)는 견적서에 나가지 않습니다.")
     with right:
@@ -135,7 +136,7 @@ if page == "Dashboard":
             .rename(columns={"company_name": "거래처", "customer_tier": "등급",
                              "discount_rate": "할인율"})
             .style.format({"할인율": "{:.0%}"}),
-            hide_index=True, width="stretch", height=360,
+            hide_index=True, width="stretch",
         )
     if len(out_of_stock):
         st.warning("품절 상품: " + ", ".join(out_of_stock["product_name"]))
@@ -144,7 +145,7 @@ elif page == "Settings / Connection":
     st.header("Settings / Connection")
     st.write("`.env` 파일에서 읽은 설정 상태입니다. 키 값 자체는 표시하지 않습니다.")
     for name, (ok, detail) in config.status().items():
-        st.write(f"{'✅' if ok else '⚠️'} **{name}** — {detail}")
+        st.write(f"{':green-badge[정상]' if ok else ':orange-badge[확인 필요]'} **{name}** — {detail}")
 
     st.divider()
     st.subheader("Google Sheets")
@@ -170,18 +171,21 @@ elif page == "New Quotation":
 
     stages = ["고객 문의 입력", "AI 요청 분석", "상품 자동 매칭",
               "거래처 선택", "견적 검토", "PDF 다운로드"]
-    # 이전 실행에서 세션에 남은 값으로 진행 상태를 표시합니다 (8단계 PDF 는 아직 없음)
+    # 이전 실행에서 세션에 남은 값으로 진행 상태를 표시합니다.
+    # 3단계는 '고를 것이 남았는지' 로만 판단합니다 — 시트에 없는 품목은 견적을 막지 않습니다.
     stage_done = [
         bool(str(st.session_state.get("inquiry", "")).strip()),
         "extraction" in st.session_state,
-        "matches" in st.session_state and not matching.unresolved(st.session_state["matches"]),
+        "matches" in st.session_state
+        and not matching.needs_choice(st.session_state["matches"]),
         "quote_customer" in st.session_state,
         "quote" in st.session_state,
         "pdf_bytes" in st.session_state,
     ]
-    st.caption(" → ".join(f"{'✅' if ok else '⬜'} {name}"
-                          for ok, name in zip(stage_done, stages)))
-    st.divider()
+    done = sum(stage_done)
+    st.progress(done / len(stages),
+                text=f"**{done} / {len(stages)} 단계 완료**  ·  "
+                     f"다음: {stages[min(done, len(stages) - 1)]}")
 
     st.subheader("1. 고객 문의 입력")
     inquiry = st.text_area(
@@ -191,7 +195,7 @@ elif page == "New Quotation":
                     "다음 주까지 납품 가능한지 확인해 주시고 견적 부탁드립니다.",
     )
     remember("inquiry", inquiry)
-    if st.button("🤖 AI 로 분석하기", type="primary"):
+    if st.button("AI 로 분석하기", type="primary"):
         allowed, reason = ai_allowed()
         # rerun 하면 화면이 다시 그려지므로 사유를 세션에 남겨야 사라지지 않습니다.
         st.session_state["quota_notice"] = "" if allowed else reason
@@ -223,11 +227,11 @@ elif page == "New Quotation":
         st.subheader("2. AI 요청 분석 결과")
         if result.source == "mock":
             notice = st.session_state.get("quota_notice")
-            st.warning("🧪 **Mock 결과입니다.** 실제 Claude API 가 아니라 단순 키워드 규칙으로 "
+            st.warning("**Mock 결과입니다.** 실제 Claude API 가 아니라 단순 키워드 규칙으로 "
                        "추출했습니다. 실무 견적에 쓰지 마세요."
                        + (f"\n\n사유: {notice}" if notice else ""))
         else:
-            st.success(f"🟢 Claude API ({extract.MODEL}) 분석 결과")
+            st.success(f"Claude API ({extract.MODEL}) 가 분석했습니다")
 
         if result.items:
             st.dataframe(
@@ -238,15 +242,19 @@ elif page == "New Quotation":
         else:
             st.info("문의 내용에서 상품 요청을 찾지 못했습니다. 상품명과 수량이 포함돼 있는지 확인하세요.")
 
-        c1, c2 = st.columns(2)
-        c1.metric("요청 납기 (고객 표현 그대로)", result.requested_delivery or "언급 없음")
-        c2.metric("추출된 품목", f"{len(result.items)}건")
+        c1, c2 = st.columns([2, 1])
+        c1.markdown("**요청 납기** (고객이 쓴 표현 그대로)  \n"
+                    + (f"“{result.requested_delivery}”" if result.requested_delivery
+                       else "언급 없음"))
+        c2.markdown(f"**추출된 품목**  \n{len(result.items)}건")
         if result.notes:
             st.write("**기타 요구사항** —", result.notes)
         for w in result.warnings:
-            st.warning(w)
+            # Mock 안내는 바로 위 배너에 이미 있습니다. 같은 경고를 두 번 쌓지 않습니다.
+            if not (result.source == "mock" and "Mock" in w):
+                st.warning(w)
 
-        st.info("⚠️ 납기일은 **확정된 것이 아닙니다.** 위 표현은 고객이 쓴 문장을 그대로 옮긴 것이며, "
+        st.info("납기일은 **확정된 것이 아닙니다.** 위 표현은 고객이 쓴 문장을 그대로 옮긴 것이며, "
                 "재고 정보만으로 납품일을 보장할 수 없습니다.")
 
     if result and result.items:
@@ -289,7 +297,7 @@ elif page == "New Quotation":
                     k1, k2, k3 = body.columns(3)
                     k1.metric("단가 (세전)", f"{int(p['unit_price']):,} ₫")
                     k2.metric("재고", f"{int(p['stock_quantity']):,}개")
-                    k3.metric("재고 상태", STOCK_LABEL[m.stock_status])
+                    k3.markdown("재고 상태  \n" + STOCK_BADGE[m.stock_status])
                     if m.shortage:
                         body.warning(f"**{m.shortage:,}개 부족** — 요청 {m.item.quantity:,}개 / "
                                      f"재고 {int(p['stock_quantity']):,}개. "
@@ -315,7 +323,7 @@ elif page == "New Quotation":
             st.error(f"**{len(not_found)}건은 시트에서 찾지 못했습니다** — "
                      + ", ".join(f"“{m.item.raw_name}”" for m in not_found)
                      + ". 이 항목은 견적에서 제외되며, **견적서에 '확인 필요' 로 명시**됩니다. "
-                       "포함해야 한다면 시트에 상품을 추가하고 🔄 로 다시 읽으세요.")
+                       "포함해야 한다면 시트에 상품을 추가하고 사이드바에서 다시 읽으세요.")
 
         st.divider()
         st.subheader("4. 거래처 선택")
@@ -436,14 +444,17 @@ elif page == "New Quotation":
                         st.metric("최종 견적 금액", f"{quote.total:,} {quote.currency}")
 
                     if discount_pct / 100 != customer.discount_rate:
-                        st.info(f"ℹ️ 할인율을 등급 기본값 {customer.discount_rate:.0%} 에서 "
+                        st.info(f"할인율을 등급 기본값 {customer.discount_rate:.0%} 에서 "
                                 f"**{discount_pct:.1f}%** 로 직접 조정했습니다.")
                     m1, m2 = st.columns(2)
-                    m1.metric("견적 유효기간", f"{valid_days}일 (~{st.session_state['quote_meta']['valid_until']})")
-                    m2.metric("요청 납기 (고객 표현)", result.requested_delivery or "언급 없음")
+                    m1.markdown(f"**견적 유효기간**  \n{valid_days}일 "
+                                f"(~{st.session_state['quote_meta']['valid_until']})")
+                    m2.markdown("**요청 납기** (고객 표현)  \n"
+                                + (f"“{result.requested_delivery}”"
+                                   if result.requested_delivery else "언급 없음"))
 
                     for s in st.session_state["quote_meta"]["shortages"]:
-                        st.warning(f"⚠️ **{s['product_name']}** — {s['shortage']:,}개 부족. "
+                        st.warning(f"**{s['product_name']}** — {s['shortage']:,}개 부족. "
                                    f"견적서에도 표시됩니다.")
                     if st.session_state["quote_meta"]["unmatched"]:
                         st.error("확인 필요 상품이 견적에서 빠졌습니다: "
@@ -509,13 +520,13 @@ else:   # Quotation Preview
         st.error(f"**PDF 생성 실패** — {type(e).__name__}: {e}")
     else:
         st.download_button(
-            "⬇️ 견적서 PDF 다운로드", data=pdf_bytes,
+            "견적서 PDF 다운로드", data=pdf_bytes,
             file_name=f"Quotation_{number}_{customer['company_name'][:20]}.pdf",
             mime="application/pdf", type="primary")
         st.caption(f"{len(pdf_bytes):,} bytes · 폰트 `{pdf.find_font().name}` "
                    f"(한글·베트남어·영문 포함)")
         for s_ in meta.get("shortages") or []:
-            st.warning(f"⚠️ 견적서에 재고 부족이 명시됩니다: {s_['product_name']} "
+            st.warning(f"견적서에 재고 부족이 명시됩니다: {s_['product_name']} "
                        f"{s_['shortage']:,}개 부족")
         if meta.get("unmatched"):
             st.error("견적서에 '확인 필요' 로 명시됩니다: " + ", ".join(meta["unmatched"]))
@@ -526,7 +537,7 @@ else:   # Quotation Preview
     lang_label = st.radio("언어", list(email_draft.LANGUAGES.values()), horizontal=True)
     language = next(k for k, v in email_draft.LANGUAGES.items() if v == lang_label)
 
-    if st.button("✉️ 이메일 초안 만들기"):
+    if st.button("이메일 초안 만들기", type="primary"):
         allowed, reason = ai_allowed()
         st.session_state["quota_notice"] = "" if allowed else reason
         try:
@@ -554,11 +565,11 @@ else:   # Quotation Preview
     if draft:
         if draft.source == "mock":
             notice = st.session_state.get("quota_notice")
-            st.warning("🧪 **Mock 초안입니다.** 고정 템플릿으로 만들었습니다. "
+            st.warning("**Mock 초안입니다.** 고정 템플릿으로 만들었습니다. "
                        "실제 Claude 가 쓴 문장이 아닙니다."
                        + (f"\n\n사유: {notice}" if notice else ""))
         else:
-            st.success(f"🟢 Claude API ({email_draft.MODEL}) 가 작성한 초안 "
+            st.success(f"Claude API ({email_draft.MODEL}) 가 작성한 초안 "
                        f"· {email_draft.LANGUAGES[draft.language]}")
         st.text_input("제목", value=draft.subject, key="draft_subject")
         st.text_area("본문", value=draft.body, height=420, key="draft_body")

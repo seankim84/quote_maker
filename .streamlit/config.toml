@@ -1,0 +1,51 @@
+# 디자인 방향: "조용한 작업대"
+#  - 배경은 따뜻한 오프화이트, 표·카드만 흰색으로 띄움        (Anthropic)
+#  - 사이드바는 조용하게, 본문은 선명하게                      (Linear)
+#  - 주색은 남색. 빨강은 '경고' 에만 남겨둠                    (기본 빨강과 경고색이 겹치던 문제)
+#  - 제목과 본문의 크기 차이를 크게                            (Linear)
+
+[theme]
+base = "light"
+
+# 색
+primaryColor = "#23436A"              # 버튼·선택 표시. 위험 신호와 분리
+backgroundColor = "#FBFAF8"           # 따뜻한 오프화이트
+secondaryBackgroundColor = "#FFFFFF"  # 표·입력칸은 흰색으로 배경 위에 뜨게
+textColor = "#1C1C1A"
+borderColor = "#E4E1DA"
+linkColor = "#23436A"
+
+# 상태 색 — 재고 정상/부족/품절/확인필요 에 쓰입니다
+greenColor = "#2F7A4D"
+orangeColor = "#B45309"
+redColor = "#B02A2A"
+grayColor = "#6B6B66"
+greenBackgroundColor = "#EAF4EE"
+orangeBackgroundColor = "#FBF0E2"
+redBackgroundColor = "#F9EAEA"
+grayBackgroundColor = "#F1F0EC"
+
+# 표
+dataframeHeaderBackgroundColor = "#F3F2EE"
+dataframeBorderColor = "#E4E1DA"
+
+# 글자 — OS 별 한글 글꼴을 순서대로 시도합니다
+font = "'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', system-ui, sans-serif"
+baseFontSize = 15
+headingFontSizes = ["2.1rem", "1.75rem", "1.1rem", "0.95rem", "0.9rem", "0.85rem"]
+headingFontWeights = [700, 680, 620, 600, 600, 600]
+metricValueFontSize = "1.6rem"
+metricValueFontWeight = 650
+
+# 모서리·테두리
+baseRadius = "0.4rem"
+buttonRadius = "0.4rem"
+showWidgetBorder = true
+showSidebarBorder = true
+
+[theme.sidebar]
+# 사이드바는 본문보다 한 단계 조용하게
+backgroundColor = "#F3F2EE"
+secondaryBackgroundColor = "#FBFAF8"
+textColor = "#3A3A36"
+borderColor = "#E4E1DA"
