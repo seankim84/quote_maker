@@ -34,12 +34,25 @@ def credentials_info() -> dict | None:
     raw = (os.getenv("GOOGLE_CREDENTIALS_JSON") or "").strip()
     if not raw:
         return None
+
+    # 가장 흔한 실수: 파일 '이름' 을 넣고 '내용' 을 넣지 않음
+    stripped = raw.strip('"\'')
+    if stripped.endswith(".json") and len(stripped) < 300:
+        raise ValueError(
+            f"GOOGLE_CREDENTIALS_JSON 에 파일 이름({stripped[:60]})이 들어 있습니다. "
+            f"파일 이름이 아니라 그 파일의 내용 전체"
+            f'({{"type":"service_account", ... }} 로 시작하는 JSON)를 넣어야 합니다. '
+            f"배포 환경에는 파일을 올릴 수 없어 내용을 직접 넣습니다.")
+
     try:
         info = json.loads(raw)
     except json.JSONDecodeError:
-        raise ValueError("GOOGLE_CREDENTIALS_JSON 이 올바른 JSON 이 아닙니다.") from None
+        raise ValueError("GOOGLE_CREDENTIALS_JSON 이 올바른 JSON 이 아닙니다. "
+                         "값이 { 로 시작하고 } 로 끝나는지, 중간이 잘리지 않았는지 "
+                         "확인하세요.") from None
     if not isinstance(info, dict) or "client_email" not in info:
-        raise ValueError("GOOGLE_CREDENTIALS_JSON 에 서비스 계정 정보가 없습니다.")
+        raise ValueError("GOOGLE_CREDENTIALS_JSON 에 서비스 계정 정보가 없습니다. "
+                         'client_email 과 private_key 가 들어있는 JSON 이어야 합니다.')
     return info
 
 
