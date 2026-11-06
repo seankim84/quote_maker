@@ -125,3 +125,57 @@ def test_comma_formatted_price_is_accepted():
 def test_error_message_names_the_product():
     with pytest.raises(PricingError, match="Monitor 24 inch"):
         make_line("P001", "Monitor 24 inch FHD IPS", 0, 2_850_000)
+
+
+# --- 검토 화면(표 편집) 이 넘기는 형태 그대로 검증 ---
+# app.py 는 st.data_editor 의 DataFrame 에서 include 열만 떼어 calculate() 에 넘깁니다.
+# AppTest 가 data_editor 를 조작할 수 없어서, 같은 변환을 여기서 직접 검사합니다.
+
+def _editor_df(rows, include=None):
+    import pandas as pd
+    include = [True] * len(rows) if include is None else include
+    return pd.DataFrame([{"include": inc, **r} for inc, r in zip(include, rows)])
+
+
+def _recalculate(df, discount_pct, tax_rate="0.10"):
+    included = df[df["include"]]
+    return calculate(included.drop(columns=["include"]).to_dict("records"),
+                     discount_rate=discount_pct / 100, tax_rate=tax_rate)
+
+
+def test_review_screen_default_matches_sheet_values():
+    q = _recalculate(_editor_df(DEMO), discount_pct=10.0)
+    assert q.total == 73_804_500
+
+
+def test_review_screen_quantity_edit_changes_total():
+    edited = [dict(DEMO[0], quantity=10), DEMO[1], DEMO[2]]   # 모니터 20 → 10
+    q = _recalculate(_editor_df(edited), discount_pct=10.0)
+    assert q.subtotal == 74_550_000 - 28_500_000
+    assert q.total == round((74_550_000 - 28_500_000) * 0.9 * 1.1)
+
+
+def test_review_screen_price_edit_changes_total():
+    edited = [dict(DEMO[0], unit_price=2_700_000), DEMO[1], DEMO[2]]  # 단가 할인 협상
+    q = _recalculate(_editor_df(edited), discount_pct=10.0)
+    assert q.lines[0].line_total == 54_000_000
+
+
+def test_review_screen_unchecking_a_row_removes_it():
+    q = _recalculate(_editor_df(DEMO, include=[True, False, True]), discount_pct=10.0)
+    assert [l.product_id for l in q.lines] == ["P001", "P007"]
+    assert q.subtotal == 57_000_000 + 4_950_000
+
+
+def test_review_screen_manual_discount_override():
+    q = _recalculate(_editor_df(DEMO), discount_pct=15.0)
+    assert q.discount == 11_182_500
+    assert q.taxable == 63_367_500
+    assert q.tax == 6_336_750
+    assert q.total == 69_704_250
+
+
+def test_review_screen_rejects_zero_quantity():
+    broken = [dict(DEMO[0], quantity=0), DEMO[1], DEMO[2]]
+    with pytest.raises(PricingError):
+        _recalculate(_editor_df(broken), discount_pct=10.0)

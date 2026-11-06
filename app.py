@@ -1,5 +1,8 @@
 """AI Quote Factory — Streamlit UI 전용. 비즈니스 로직은 core/ 에 둡니다."""
 
+from datetime import date, timedelta
+
+import pandas as pd
 import streamlit as st
 
 from core import config, extract, matching, pricing, sheets
@@ -117,11 +120,19 @@ elif page == "Settings / Connection":
 elif page == "New Quotation":
     st.header("New Quotation")
 
-    done = "extraction" in st.session_state
     stages = ["고객 문의 입력", "AI 요청 분석", "상품 자동 매칭",
-              "가격·재고 확인", "견적 검토", "PDF 다운로드"]
-    st.caption(" → ".join(f"{'✅' if i < (2 if done else 0) else '⬜'} {name}"
-                          for i, name in enumerate(stages)))
+              "거래처 선택", "견적 검토", "PDF 다운로드"]
+    # 이전 실행에서 세션에 남은 값으로 진행 상태를 표시합니다 (8단계 PDF 는 아직 없음)
+    stage_done = [
+        bool(str(st.session_state.get("inquiry", "")).strip()),
+        "extraction" in st.session_state,
+        "matches" in st.session_state and not matching.unresolved(st.session_state["matches"]),
+        "quote_customer" in st.session_state,
+        "quote" in st.session_state,
+        False,
+    ]
+    st.caption(" → ".join(f"{'✅' if ok else '⬜'} {name}"
+                          for ok, name in zip(stage_done, stages)))
     st.divider()
 
     st.subheader("1. 고객 문의 입력")
@@ -227,61 +238,124 @@ elif page == "New Quotation":
                        f"금액을 계산할 수 있습니다.")
 
         st.divider()
-        st.subheader("4. 고객 선택 · 금액 계산")
-
+        st.subheader("4. 거래처 선택")
         customers = data.customers
         labels = [f"{r.company_name} · {r.customer_tier} · 할인 {r.discount_rate:.0%}"
                   for r in customers.itertuples()]
         picked = st.selectbox("거래처", ["(선택하세요)"] + labels, key="customer")
         customer = None if picked == "(선택하세요)" else customers.iloc[labels.index(picked)]
+        if customer is not None:
+            st.caption(f"담당자 {customer.contact_name} · {customer.email}")
 
         if customer is None:
-            st.info("거래처를 선택하면 등급 할인이 적용된 금액을 계산합니다.")
+            st.info("거래처를 선택하면 등급 할인이 적용된 견적을 계산합니다.")
         elif pending:
-            st.caption("미확정 상품을 먼저 처리하세요.")
+            st.warning("미확정 상품을 먼저 처리하세요.")
         else:
-            try:
-                quote = pricing.calculate(
-                    pricing.rows_from_matches(resolved),
-                    discount_rate=customer.discount_rate,
-                    tax_rate=data.settings["tax_rate"],
-                    currency=data.settings["default_currency"],
-                )
-            except pricing.PricingError as e:
+            st.divider()
+            st.subheader("5. 견적 검토 · 수정")
+            st.caption("수량·단가를 고치면 금액이 바로 다시 계산됩니다. "
+                       "상품명은 시트의 값이라 바꿀 수 없습니다 — 다른 상품이 필요하면 위에서 다시 고르세요.")
+
+            base = pricing.rows_from_matches(resolved)
+            # 확정된 상품이 바뀌면 편집 중이던 표를 초기화합니다
+            signature = tuple((r["product_id"], r["quantity"]) for r in base)
+            if st.session_state.get("lines_signature") != signature:
+                st.session_state["lines_signature"] = signature
+                st.session_state.pop("lines_editor", None)
+
+            # 컬럼 이름은 영문(pricing 이 기대하는 키)으로 두고 화면 라벨만 따로 지정합니다.
+            edited = st.data_editor(
+                pd.DataFrame([{"include": True, **r} for r in base]),
+                key="lines_editor", hide_index=True, width="stretch",
+                num_rows="fixed", disabled=["product_id", "product_name"],
+                column_order=["include", "product_id", "product_name", "quantity", "unit_price"],
+                column_config={
+                    "include": st.column_config.CheckboxColumn(
+                        "포함", help="체크를 풀면 이 상품을 견적에서 뺍니다"),
+                    "product_id": st.column_config.TextColumn("ID"),
+                    "product_name": st.column_config.TextColumn("상품명"),
+                    "quantity": st.column_config.NumberColumn("수량", min_value=1, step=1, format="%d"),
+                    "unit_price": st.column_config.NumberColumn("단가 (세전)", min_value=1,
+                                                                step=1000, format="%d"),
+                })
+
+            c1, c2 = st.columns(2)
+            discount_pct = c1.number_input(
+                f"할인율 (%) — {customer.customer_tier} 등급 기본값 {customer.discount_rate:.0%}",
+                min_value=0.0, max_value=99.0, step=0.5,
+                value=float(customer.discount_rate * 100), key="discount_pct")
+            valid_days = c2.number_input(
+                "견적 유효기간 (일)", min_value=1, max_value=365, step=1,
+                value=int(float(data.settings["quotation_valid_days"])), key="valid_days")
+            special_notes = st.text_area(
+                "특이사항 (견적서 비고란에 그대로 들어갑니다)", key="special_notes",
+                placeholder="예: 납품 장소는 1지점 창고. 설치 지원 포함.")
+
+            included = edited[edited["include"]]
+            if included.empty:
+                st.info("견적에 포함할 상품을 하나 이상 체크하세요.")
                 st.session_state.pop("quote", None)
-                st.error(f"**금액을 계산할 수 없습니다** — {e}")
             else:
-                st.session_state["quote"] = quote
-                st.session_state["quote_customer"] = customer.to_dict()
+                try:
+                    quote = pricing.calculate(
+                        included.drop(columns=["include"]).to_dict("records"),
+                        discount_rate=discount_pct / 100,
+                        tax_rate=data.settings["tax_rate"],
+                        currency=data.settings["default_currency"],
+                    )
+                except pricing.PricingError as e:
+                    st.session_state.pop("quote", None)
+                    st.error(f"**금액을 계산할 수 없습니다** — {e}")
+                else:
+                    st.session_state["quote"] = quote
+                    st.session_state["quote_customer"] = customer.to_dict()
+                    st.session_state["quote_meta"] = {
+                        "valid_days": int(valid_days),
+                        "valid_until": (date.today() + timedelta(days=int(valid_days))).isoformat(),
+                        "requested_delivery": result.requested_delivery,
+                        "notes": special_notes.strip(),
+                        "customer_notes": result.notes,
+                        "shortages": [{"product_name": m.product["product_name"],
+                                       "shortage": m.shortage} for m in resolved if m.shortage],
+                        "unmatched": [m.item.raw_name for m in pending],
+                    }
 
-                st.dataframe(
-                    [{"상품명": l.product_name, "수량": f"{l.quantity:,}",
-                      "단가 (세전)": f"{l.unit_price:,}",
-                      "금액 (세전)": f"{l.line_total:,}"} for l in quote.lines],
-                    hide_index=True, width="stretch")
-
-                money = [("소계 (세전)", quote.subtotal),
-                         (f"할인 ({quote.discount_rate:.0%}, {customer.customer_tier})",
-                          -quote.discount),
-                         ("과세 대상", quote.taxable),
-                         (f"VAT ({quote.tax_rate:.0%})", quote.tax)]
-                left, right = st.columns([2, 1])
-                with right:
-                    for label, amount in money:
-                        st.write(f"{label}  \n**{amount:,} {quote.currency}**")
                     st.divider()
-                    st.metric("최종 견적 금액", f"{quote.total:,} {quote.currency}")
-                with left:
-                    st.caption(
-                        "계산 순서: 상품별 합계 → 소계 → **할인** → 과세 대상 → **세금** → 최종 금액. "
-                        "할인을 먼저 적용하고 할인된 금액에 세금을 매깁니다.\n\n"
-                        "모든 단가는 **세전**이며, 금액은 전부 파이썬이 계산합니다 "
-                        "(Claude 는 숫자를 만지지 않습니다). VND 는 소수점이 없어 "
-                        "할인·세금은 정수로 반올림합니다(0.5 는 올림).")
-                    if short:
-                        st.warning(f"⚠️ 이 견적에는 재고가 부족한 상품이 {len(short)}건 "
-                                   f"포함돼 있습니다. 견적서에도 표시됩니다.")
-                st.caption("다음 단계(7단계)에서 수량·단가·할인율을 직접 수정할 수 있게 만듭니다.")
+                    st.subheader("6. 견적 요약")
+                    left, right = st.columns([2, 1])
+                    with left:
+                        st.dataframe(
+                            [{"상품명": l.product_name, "수량": f"{l.quantity:,}",
+                              "단가 (세전)": f"{l.unit_price:,}",
+                              "금액 (세전)": f"{l.line_total:,}"} for l in quote.lines],
+                            hide_index=True, width="stretch")
+                        st.caption("계산 순서: 상품별 합계 → 소계 → **할인** → 과세 대상 → **세금** → 최종 금액. "
+                                   "모든 단가는 **세전**이며 계산은 전부 파이썬이 합니다.")
+                    with right:
+                        for label, amount in [
+                                ("소계 (세전)", quote.subtotal),
+                                (f"할인 ({quote.discount_rate:.1%})", -quote.discount),
+                                ("과세 대상", quote.taxable),
+                                (f"VAT ({quote.tax_rate:.0%})", quote.tax)]:
+                            st.write(f"{label}  \n**{amount:,} {quote.currency}**")
+                        st.divider()
+                        st.metric("최종 견적 금액", f"{quote.total:,} {quote.currency}")
+
+                    if discount_pct / 100 != customer.discount_rate:
+                        st.info(f"ℹ️ 할인율을 등급 기본값 {customer.discount_rate:.0%} 에서 "
+                                f"**{discount_pct:.1f}%** 로 직접 조정했습니다.")
+                    m1, m2 = st.columns(2)
+                    m1.metric("견적 유효기간", f"{valid_days}일 (~{st.session_state['quote_meta']['valid_until']})")
+                    m2.metric("요청 납기 (고객 표현)", result.requested_delivery or "언급 없음")
+
+                    for s in st.session_state["quote_meta"]["shortages"]:
+                        st.warning(f"⚠️ **{s['product_name']}** — {s['shortage']:,}개 부족. "
+                                   f"견적서에도 표시됩니다.")
+                    if st.session_state["quote_meta"]["unmatched"]:
+                        st.error("확인 필요 상품이 견적에서 빠졌습니다: "
+                                 + ", ".join(st.session_state["quote_meta"]["unmatched"]))
+                    st.caption("다음 단계(8단계)에서 이 내용으로 PDF 견적서와 이메일 초안을 만듭니다.")
 
 elif page == "Product Search":
     st.header("Product Search")
