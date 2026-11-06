@@ -112,5 +112,19 @@ def choose(match: Match, product_id: str) -> Match:
 
 
 def unresolved(matches: list[Match]) -> list[Match]:
-    """견적을 내기 전에 사람이 처리해야 하는 항목들."""
+    """확정되지 않은 항목 전부 (선택 필요 + 확인 필요)."""
     return [m for m in matches if m.status != MATCHED]
+
+
+def needs_choice(matches: list[Match]) -> list[Match]:
+    """사용자가 고르기만 하면 해결되는 항목. 이게 남아있으면 견적을 내면 안 됩니다."""
+    return [m for m in matches if m.status == CHOICE]
+
+
+def not_found(matches: list[Match]) -> list[Match]:
+    """시트에 없어서 여기서 해결할 수 없는 항목.
+
+    견적을 막지 않습니다 — 제외하고 진행하되 견적서에 '확인 필요' 로 명시합니다.
+    막아버리면 시트에 없는 품목 하나 때문에 견적을 아예 낼 수 없습니다.
+    """
+    return [m for m in matches if m.status == NOT_FOUND]

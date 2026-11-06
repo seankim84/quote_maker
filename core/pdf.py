@@ -109,7 +109,8 @@ def story(quote, customer: dict, settings: dict, meta: dict,
 
     # --- 머리말: 로고 + 회사 정보 / QUOTATION ---
     if LOGO_PATH.is_file():
-        brand = Image(str(LOGO_PATH), width=38 * mm, height=13 * mm, kind="proportional")
+        # kind="proportional": 비율을 유지하며 이 박스 안에 들어가도록 축소합니다
+        brand = Image(str(LOGO_PATH), width=45 * mm, height=18 * mm, kind="proportional")
     else:
         brand = Paragraph(f"<b>{settings.get('company_name', '')}</b>",
                           _style(font, 15))

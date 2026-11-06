@@ -26,6 +26,17 @@ META = {"valid_days": 14, "valid_until": "2026-11-20",
         "customer_notes": "견적 요청", "shortages": [], "unmatched": []}
 
 
+def _walk_nodes(node):
+    """표 안쪽까지 포함해 모든 ReportLab 요소를 훑습니다."""
+    if isinstance(node, (list, tuple)):
+        for child in node:
+            yield from _walk_nodes(child)
+    else:
+        yield node
+        if hasattr(node, "_cellvalues"):
+            yield from _walk_nodes(node._cellvalues)
+
+
 def _text(*args, **kwargs) -> str:
     """견적서에 들어가는 모든 글자를 모읍니다 (표 안쪽까지).
 
@@ -112,10 +123,36 @@ def test_pdf_shows_unidentified_items():
     assert "Not identified" in text
 
 
-def test_pdf_works_without_a_logo_file():
-    """assets/logo.png 가 없어도 회사명으로 대체되어 생성됩니다."""
-    assert not pdf.LOGO_PATH.is_file() or pdf.LOGO_PATH.is_file()
+def test_logo_is_used_when_the_file_exists():
+    from reportlab.platypus import Image
+    if not pdf.LOGO_PATH.is_file():
+        pytest.skip("assets/logo.png 가 없습니다")
+    flow = pdf.story(QUOTE, CUSTOMER, SETTINGS, META)
+    images = [n for n in _walk_nodes(flow) if isinstance(n, Image)]
+    assert images, "로고 파일이 있는데 PDF 에 들어가지 않았습니다"
+    data = pdf.build(QUOTE, CUSTOMER, SETTINGS, META)
+    assert b"/Image" in data          # PDF 안에 이미지 객체가 존재
+
+
+def test_company_name_replaces_a_missing_logo(monkeypatch, tmp_path):
+    """로고가 없으면 회사명 텍스트로 대체되고, 생성은 계속됩니다."""
+    monkeypatch.setattr(pdf, "LOGO_PATH", tmp_path / "nope.png")
+    text = _text(QUOTE, CUSTOMER, SETTINGS, META)
+    assert SETTINGS["company_name"] in text
     assert pdf.build(QUOTE, CUSTOMER, SETTINGS, META).startswith(b"%PDF-")
+
+
+def test_logo_keeps_its_aspect_ratio():
+    """비율을 무시하고 늘리면 로고가 찌그러집니다."""
+    from reportlab.platypus import Image
+    if not pdf.LOGO_PATH.is_file():
+        pytest.skip("assets/logo.png 가 없습니다")
+    img = next(n for n in _walk_nodes(pdf.story(QUOTE, CUSTOMER, SETTINGS, META))
+               if isinstance(n, Image))
+    from PIL import Image as PILImage
+    with PILImage.open(pdf.LOGO_PATH) as original:
+        source_ratio = original.width / original.height
+    assert abs(img.drawWidth / img.drawHeight - source_ratio) < 0.02
 
 
 def test_pdf_survives_empty_optional_fields():

@@ -35,12 +35,17 @@ def mock_mode() -> bool:
     return is_mock(anthropic_key(), force_mock())
 
 
+def masked(secret: str) -> str:
+    """키의 마지막 4자리만. 짧은 키는 전체가 드러나므로 아무것도 보여주지 않습니다."""
+    return f"설정됨 (…{secret[-4:]})" if len(secret) >= 12 else "설정됨"
+
+
 def status() -> dict[str, tuple[bool, str]]:
     """Settings 화면용 연결 상태. 키 값 자체는 절대 반환하지 않습니다."""
     key = anthropic_key()
     creds = credentials_path()
     return {
-        "Claude API 키": (bool(key), f"설정됨 (…{key[-4:]})" if key else "없음 → Mock 모드"),
+        "Claude API 키": (bool(key), masked(key) if key else "없음 → Mock 모드"),
         "Google Sheet ID": (bool(sheet_id()), "설정됨" if sheet_id() else "없음"),
         "서비스 계정 파일": (creds.is_file(), creds.name if creds.is_file() else f"{creds.name} 없음"),
         "실행 모드": (not mock_mode(), "실제 Claude API" if not mock_mode() else "Mock (가짜 응답)"),

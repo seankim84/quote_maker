@@ -21,6 +21,17 @@ STOCK_LABEL = {
 }
 
 
+def remember(name, value):
+    """Streamlit 은 화면을 옮기면 '렌더되지 않은 위젯' 의 상태를 버립니다.
+    그래서 중요한 입력은 위젯 키와 별도로 보관해 두고 돌아올 때 되살립니다."""
+    st.session_state[f"saved_{name}"] = value
+    return value
+
+
+def recall(name, default=None):
+    return st.session_state.get(f"saved_{name}", default)
+
+
 @st.cache_data(ttl=300, show_spinner="Google Sheets 읽는 중…")
 def load_sheet():
     """5분 캐시. 시트를 고쳤으면 사이드바의 '새로 읽기' 를 누르세요."""
@@ -138,17 +149,23 @@ elif page == "New Quotation":
     st.subheader("1. 고객 문의 입력")
     inquiry = st.text_area(
         "고객이 보낸 메일이나 메시지를 그대로 붙여넣으세요.",
-        height=160, key="inquiry",
+        height=160, key="inquiry", value=recall("inquiry", ""),
         placeholder="안녕하세요. 모니터 20대, 키보드 30개, 무선 마우스 30개가 필요합니다.\n"
                     "다음 주까지 납품 가능한지 확인해 주시고 견적 부탁드립니다.",
     )
+    remember("inquiry", inquiry)
     if st.button("🤖 AI 로 분석하기", type="primary"):
         try:
             with st.spinner("문의 내용을 분석하는 중…"):
                 st.session_state["extraction"] = extract.extract(inquiry)
-            # 이전 문의에서 고른 상품이 새 결과에 섞이지 않도록 비움
-            for key in [k for k in st.session_state if str(k).startswith("choice_")]:
-                del st.session_state[key]
+            # 이전 문의의 흔적이 새 견적에 섞이지 않도록 모두 비웁니다.
+            # 특히 draft/pdf_bytes 를 남기면 다른 고객에게 보낼 초안이 화면에 남습니다.
+            for key in [k for k in st.session_state if str(k).startswith("choice_")] + [
+                    "quote", "quote_customer", "quote_meta", "quote_number",
+                    "draft", "draft_for", "pdf_bytes", "pdf_for", "matches", "lines_signature",
+                    "lines_editor", "saved_choices", "saved_lines", "saved_customer_id",
+                    "saved_discount_pct", "saved_valid_days", "saved_notes"]:
+                st.session_state.pop(key, None)
         except extract.ExtractError as e:
             st.session_state.pop("extraction", None)
             st.error(str(e))
@@ -201,8 +218,13 @@ elif page == "New Quotation":
                         f"{c['product_id']} · {c['product_name']} · "
                         f"{int(c['unit_price']):,} ₫ · 재고 {int(c['stock_quantity']):,}"
                         for c in m.candidates]
-                    picked = body.selectbox("상품 선택", labels, key=f"choice_{idx}",
-                                            label_visibility="collapsed")
+                    saved = (recall("choices") or {}).get(str(idx))
+                    picked = body.selectbox(
+                        "상품 선택", labels, key=f"choice_{idx}",
+                        index=labels.index(saved) if saved in labels else 0,
+                        label_visibility="collapsed")
+                    st.session_state["saved_choices"] = {
+                        **(recall("choices") or {}), str(idx): picked}
                     if picked != "(선택하세요)":
                         m = matching.choose(m, picked.split(" · ")[0])
 
@@ -226,31 +248,45 @@ elif page == "New Quotation":
             resolved.append(m)
 
         st.session_state["matches"] = resolved
-        pending = matching.unresolved(resolved)
+        # 선택만 하면 해결되는 항목은 견적을 막습니다. 시트에 없는 항목은
+        # 여기서 해결할 수 없으므로 제외하고 진행하며, 견적서에 '확인 필요' 로 표시합니다.
+        needs_choice = matching.needs_choice(resolved)
+        not_found = matching.not_found(resolved)
         short = [m for m in resolved if m.shortage]
         c1, c2, c3 = st.columns(3)
-        c1.metric("확정된 상품", f"{len(resolved) - len(pending)} / {len(resolved)}")
+        c1.metric("확정된 상품", f"{len(resolved) - len(needs_choice) - len(not_found)}"
+                              f" / {len(resolved)}")
         c2.metric("재고 부족·품절", f"{len(short)}건")
-        c3.metric("처리 필요", f"{len(pending)}건")
+        c3.metric("확인 필요", f"{len(not_found)}건")
 
-        if pending:
-            st.warning(f"**{len(pending)}건이 미확정입니다.** 상품을 고르거나 확인해야 "
-                       f"금액을 계산할 수 있습니다.")
+        if needs_choice:
+            st.warning(f"**{len(needs_choice)}건을 골라야 합니다.** 상품을 선택하면 "
+                       f"금액을 계산합니다.")
+        if not_found:
+            st.error(f"**{len(not_found)}건은 시트에서 찾지 못했습니다** — "
+                     + ", ".join(f"“{m.item.raw_name}”" for m in not_found)
+                     + ". 이 항목은 견적에서 제외되며, **견적서에 '확인 필요' 로 명시**됩니다. "
+                       "포함해야 한다면 시트에 상품을 추가하고 🔄 로 다시 읽으세요.")
 
         st.divider()
         st.subheader("4. 거래처 선택")
         customers = data.customers
         labels = [f"{r.company_name} · {r.customer_tier} · 할인 {r.discount_rate:.0%}"
                   for r in customers.itertuples()]
-        picked = st.selectbox("거래처", ["(선택하세요)"] + labels, key="customer")
+        options = ["(선택하세요)"] + labels
+        saved_cid = recall("customer_id")
+        default = next((i + 1 for i, r in enumerate(customers.itertuples())
+                        if r.customer_id == saved_cid), 0)
+        picked = st.selectbox("거래처", options, index=default, key="customer")
         customer = None if picked == "(선택하세요)" else customers.iloc[labels.index(picked)]
+        remember("customer_id", None if customer is None else customer.customer_id)
         if customer is not None:
             st.caption(f"담당자 {customer.contact_name} · {customer.email}")
 
         if customer is None:
             st.info("거래처를 선택하면 등급 할인이 적용된 견적을 계산합니다.")
-        elif pending:
-            st.warning("미확정 상품을 먼저 처리하세요.")
+        elif needs_choice:
+            st.warning("먼저 위에서 상품을 선택하세요.")
         else:
             st.divider()
             st.subheader("5. 견적 검토 · 수정")
@@ -263,10 +299,11 @@ elif page == "New Quotation":
             if st.session_state.get("lines_signature") != signature:
                 st.session_state["lines_signature"] = signature
                 st.session_state.pop("lines_editor", None)
+                st.session_state.pop("saved_lines", None)
 
             # 컬럼 이름은 영문(pricing 이 기대하는 키)으로 두고 화면 라벨만 따로 지정합니다.
             edited = st.data_editor(
-                pd.DataFrame([{"include": True, **r} for r in base]),
+                pd.DataFrame(recall("lines") or [{"include": True, **r} for r in base]),
                 key="lines_editor", hide_index=True, width="stretch",
                 num_rows="fixed", disabled=["product_id", "product_name"],
                 column_order=["include", "product_id", "product_name", "quantity", "unit_price"],
@@ -284,14 +321,21 @@ elif page == "New Quotation":
             discount_pct = c1.number_input(
                 f"할인율 (%) — {customer.customer_tier} 등급 기본값 {customer.discount_rate:.0%}",
                 min_value=0.0, max_value=99.0, step=0.5,
-                value=float(customer.discount_rate * 100), key="discount_pct")
+                value=float(recall("discount_pct", customer.discount_rate * 100)),
+                key="discount_pct")
             valid_days = c2.number_input(
                 "견적 유효기간 (일)", min_value=1, max_value=365, step=1,
-                value=int(float(data.settings["quotation_valid_days"])), key="valid_days")
+                value=int(recall("valid_days", float(data.settings["quotation_valid_days"]))),
+                key="valid_days")
             special_notes = st.text_area(
                 "특이사항 (견적서 비고란에 그대로 들어갑니다)", key="special_notes",
+                value=recall("notes", ""),
                 placeholder="예: 납품 장소는 1지점 창고. 설치 지원 포함.")
 
+            remember("lines", edited.to_dict("records"))
+            remember("discount_pct", float(discount_pct))
+            remember("valid_days", int(valid_days))
+            remember("notes", special_notes)
             included = edited[edited["include"]]
             if included.empty:
                 st.info("견적에 포함할 상품을 하나 이상 체크하세요.")
@@ -318,7 +362,7 @@ elif page == "New Quotation":
                         "customer_notes": result.notes,
                         "shortages": [{"product_name": m.product["product_name"],
                                        "shortage": m.shortage} for m in resolved if m.shortage],
-                        "unmatched": [m.item.raw_name for m in pending],
+                        "unmatched": [m.item.raw_name for m in not_found],
                     }
 
                     st.divider()
@@ -395,15 +439,26 @@ else:   # Quotation Preview
 
     st.divider()
     st.subheader("PDF 견적서")
+    # 견적 내용이 바뀌지 않았으면 PDF 를 다시 만들지 않습니다.
+    # 로고가 들어간 PDF 생성은 ~0.8 초라, 매 클릭마다 다시 만들면 화면이 눌립니다.
+    fingerprint = (number, quote.total,
+                   tuple((l.product_id, l.quantity, l.unit_price) for l in quote.lines),
+                   meta.get("valid_until"), meta.get("notes"),
+                   tuple(s["product_name"] for s in meta.get("shortages") or []),
+                   tuple(meta.get("unmatched") or []))
+
     try:
         # 변수명을 data 로 쓰면 시트 데이터(data)를 덮어씁니다
-        pdf_bytes = pdf.build(quote, customer, data.settings, meta, number=number)
+        if st.session_state.get("pdf_for") != fingerprint:
+            st.session_state["pdf_bytes"] = pdf.build(
+                quote, customer, data.settings, meta, number=number)
+            st.session_state["pdf_for"] = fingerprint
+        pdf_bytes = st.session_state["pdf_bytes"]
     except pdf.FontError as e:
         st.error(f"**폰트 문제로 PDF 를 만들 수 없습니다** — {e}")
     except Exception as e:
         st.error(f"**PDF 생성 실패** — {type(e).__name__}: {e}")
     else:
-        st.session_state["pdf_bytes"] = pdf_bytes
         st.download_button(
             "⬇️ 견적서 PDF 다운로드", data=pdf_bytes,
             file_name=f"Quotation_{number}_{customer['company_name'][:20]}.pdf",
@@ -427,11 +482,19 @@ else:   # Quotation Preview
             with st.spinner("초안을 작성하는 중…"):
                 st.session_state["draft"] = email_draft.generate(
                     quote, customer, data.settings, meta, number, language)
+                st.session_state["draft_for"] = fingerprint
         except email_draft.DraftError as e:
             st.session_state.pop("draft", None)
             st.error(str(e))
 
     draft = st.session_state.get("draft")
+    if draft and st.session_state.get("draft_for") != fingerprint:
+        # 틀린 금액이 적힌 초안이 고객에게 가는 것을 막습니다
+        st.session_state.pop("draft", None)
+        st.session_state.pop("draft_for", None)
+        draft = None
+        st.warning("견적 내용이 바뀌었습니다. 이전 초안은 금액이 맞지 않아 삭제했습니다. "
+                   "초안을 다시 만들어 주세요.")
     if draft:
         if draft.source == "mock":
             st.warning("🧪 **Mock 초안입니다.** 고정 템플릿으로 만들었습니다. "

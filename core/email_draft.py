@@ -44,6 +44,9 @@ for an office-supply distributor in Vietnam writing to a corporate customer.
 Rules:
 - Write in the requested language only.
 - Use ONLY the facts given. Never invent prices, products, quantities or dates.
+- Write every product name EXACTLY as given, character for character. Do not translate,
+  localise, shorten or re-order product names, even when writing in another language.
+  The quotation document uses these exact names and the customer must be able to match them.
 - Never promise or imply a delivery date, even if the customer asked for one.
 - If a stock shortage is listed, mention it honestly and briefly.
 - Mention that the quotation is attached and state its validity date.
@@ -70,7 +73,8 @@ def facts(quote, customer: dict, settings: dict, meta: dict, number: str,
              f"Quotation number: {number}",
              f"Quotation valid until: {meta.get('valid_until', '')}",
              f"Currency: {quote.currency}",
-             "Items (name / quantity / unit price, all pre-tax):"]
+             "Items (name / quantity / unit price, all pre-tax) — "
+             "copy each name verbatim, do not translate:"]
     lines += [f"  - {l.product_name} / {l.quantity} / {l.unit_price:,}"
               for l in quote.lines]
     lines += [f"Subtotal (pre-tax): {quote.subtotal:,}",

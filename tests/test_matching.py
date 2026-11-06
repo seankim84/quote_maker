@@ -114,3 +114,41 @@ def test_empty_catalogue_does_not_crash():
     empty = PRODUCTS.iloc[0:0]
     m = match_item(empty, item("Monitor", 5))
     assert m.status == NOT_FOUND and m.candidates == []
+
+
+# --- 견적을 막아야 하는 항목 vs 제외하고 진행할 항목 ---
+# 이 구분이 틀리면: 시트에 없는 품목 하나 때문에 견적을 아예 못 내거나(너무 엄격),
+# 사용자가 고르지 않은 애매한 상품이 멋대로 견적에 들어갑니다(너무 느슨).
+
+def test_choice_blocks_but_not_found_does_not():
+    from core.matching import needs_choice, not_found
+    matches = [match_item(PRODUCTS, item("Wireless Mouse", 5)),   # 확정
+               match_item(PRODUCTS, item("Monitor", 5)),          # 선택 필요
+               match_item(PRODUCTS, item("Forklift", 1))]         # 확인 필요
+    assert [m.item.search_term for m in needs_choice(matches)] == ["Monitor"]
+    assert [m.item.search_term for m in not_found(matches)] == ["Forklift"]
+
+
+def test_not_found_items_are_excluded_from_the_quotation_rows():
+    from core.pricing import rows_from_matches
+    matches = [match_item(PRODUCTS, item("Wireless Mouse", 5)),
+               match_item(PRODUCTS, item("Forklift", 1))]
+    rows = rows_from_matches(matches)
+    assert [r["product_id"] for r in rows] == ["P007"]      # 지게차는 빠짐
+
+
+def test_a_quotation_is_still_possible_with_an_unknown_item():
+    """시트에 없는 품목이 섞여도 나머지로 견적을 낼 수 있어야 합니다."""
+    from core.matching import needs_choice
+    from core.pricing import calculate, rows_from_matches
+    matches = [match_item(PRODUCTS, item("Wireless Mouse", 5)),
+               match_item(PRODUCTS, item("Forklift", 1))]
+    assert needs_choice(matches) == []                      # 막을 이유 없음
+    quote = calculate(rows_from_matches(matches), 0.1, 0.1)
+    assert quote.subtotal == 165_000 * 5
+
+
+def test_an_unpicked_choice_never_enters_the_quotation():
+    from core.pricing import rows_from_matches
+    matches = [match_item(PRODUCTS, item("Monitor", 5))]     # 아직 고르지 않음
+    assert rows_from_matches(matches) == []
