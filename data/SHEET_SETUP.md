@@ -56,9 +56,9 @@ CSV 하나당 아래를 반복합니다 (Products → Customers → Settings).
 
 | key | 이 데모 값 | 쓰이는 곳 |
 |---|---|---|
-| company_name | ANB Office Solutions Co., Ltd. | 견적서 머리말 |
+| company_name | Demo Office Solutions Co., Ltd. | 견적서 머리말 |
 | company_address | 123 Nguyễn Huệ, District 1, HCMC | 견적서 머리말 |
-| company_email | sales@anb-office.vn | 견적서 연락처 |
+| company_email | sales@example.com | 견적서 연락처 |
 | quotation_valid_days | 14 | 견적 유효기간 계산 |
 | default_currency | VND | 금액 표시 |
 | tax_rate | 0.10 | 세금 계산 |

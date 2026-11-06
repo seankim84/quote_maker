@@ -16,11 +16,11 @@ QUOTE = calculate([
      "quantity": 30, "unit_price": 165_000},
 ], discount_rate=0.10, tax_rate=0.10)
 
-CUSTOMER = {"company_name": "Bình Dương Garment JSC", "contact_name": "김재훈",
-            "email": "huong.pham@bdgarment.vn", "customer_tier": "VIP"}
-SETTINGS = {"company_name": "ANB Office Solutions Co., Ltd.",
+CUSTOMER = {"company_name": "Bình Dương Sample Garment JSC", "contact_name": "김재훈",
+            "email": "demo.c005@example.com", "customer_tier": "VIP"}
+SETTINGS = {"company_name": "Demo Office Solutions Co., Ltd.",
             "company_address": "123 Nguyễn Huệ, District 1, Ho Chi Minh City",
-            "company_email": "sales@anb-office.vn", "default_currency": "VND"}
+            "company_email": "sales@example.com", "default_currency": "VND"}
 META = {"valid_days": 14, "valid_until": "2026-11-20",
         "requested_delivery": "다음 주까지", "notes": "납품 장소는 1지점 창고",
         "customer_notes": "견적 요청", "shortages": [], "unmatched": []}
@@ -164,7 +164,7 @@ def test_pdf_survives_empty_optional_fields():
 def test_content_includes_korean_and_vietnamese_as_typed():
     text = _text(QUOTE, CUSTOMER, SETTINGS, META)
     assert "김재훈" in text                      # 한글 담당자명
-    assert "Bình Dương Garment JSC" in text      # 베트남어 회사명
+    assert "Bình Dương Sample Garment JSC" in text      # 베트남어 회사명
     assert "Nguyễn Huệ" in text                  # 베트남어 주소
     assert "견적서" in text and "QUOTATION" in text
 

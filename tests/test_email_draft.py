@@ -13,10 +13,10 @@ QUOTE = calculate([
      "quantity": 30, "unit_price": 165_000},
 ], discount_rate=0.10, tax_rate=0.10)
 
-CUSTOMER = {"company_name": "Bình Dương Garment JSC", "contact_name": "Phạm Thị Hương",
-            "email": "huong.pham@bdgarment.vn", "customer_tier": "Gold"}
-SETTINGS = {"company_name": "ANB Office Solutions Co., Ltd.",
-            "company_email": "sales@anb-office.vn"}
+CUSTOMER = {"company_name": "Bình Dương Sample Garment JSC", "contact_name": "Phạm Thị Hương",
+            "email": "demo.c005@example.com", "customer_tier": "Gold"}
+SETTINGS = {"company_name": "Demo Office Solutions Co., Ltd.",
+            "company_email": "sales@example.com"}
 META = {"valid_until": "2026-11-20", "requested_delivery": "다음 주까지",
         "shortages": [{"product_name": "Mouse Wireless", "shortage": 12}],
         "unmatched": [], "notes": ""}
