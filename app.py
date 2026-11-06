@@ -2,12 +2,20 @@
 
 import streamlit as st
 
-from core import config, extract, sheets
+from core import config, extract, matching, sheets
 
 st.set_page_config(page_title="AI Quote Factory", page_icon="📄", layout="wide")
 
 PAGES = ["Dashboard", "New Quotation", "Product Search", "Quotation Preview",
          "Settings / Connection"]
+
+
+STOCK_LABEL = {
+    matching.STOCK_OK: "✅ 정상",
+    matching.STOCK_SHORT: "⚠️ 재고 부족",
+    matching.STOCK_OUT: "🔴 품절",
+    matching.STOCK_UNKNOWN: "❓ 확인 필요",
+}
 
 
 @st.cache_data(ttl=300, show_spinner="Google Sheets 읽는 중…")
@@ -127,6 +135,9 @@ elif page == "New Quotation":
         try:
             with st.spinner("문의 내용을 분석하는 중…"):
                 st.session_state["extraction"] = extract.extract(inquiry)
+            # 이전 문의에서 고른 상품이 새 결과에 섞이지 않도록 비움
+            for key in [k for k in st.session_state if str(k).startswith("choice_")]:
+                del st.session_state[key]
         except extract.ExtractError as e:
             st.session_state.pop("extraction", None)
             st.error(str(e))
@@ -160,13 +171,81 @@ elif page == "New Quotation":
 
         st.info("⚠️ 납기일은 **확정된 것이 아닙니다.** 위 표현은 고객이 쓴 문장을 그대로 옮긴 것이며, "
                 "재고 정보만으로 납품일을 보장할 수 없습니다.")
-        st.caption("다음 단계(5단계)에서 이 검색어로 시트의 실제 상품을 찾아 매칭합니다. "
-                   "상품과 가격은 Google Sheets 에만 존재하며 AI 가 만들어내지 않습니다.")
+
+    if result and result.items:
+        st.divider()
+        st.subheader("3. 상품 자동 매칭 · 재고 확인")
+        st.caption("상품과 단가는 Google Sheets 에만 존재합니다. AI 가 만들어낸 값은 쓰지 않습니다.")
+
+        resolved = []
+        for idx, m in enumerate(matching.match_items(data.products, result.items)):
+            with st.container(border=True):
+                head, body = st.columns([1, 3])
+                head.markdown(f"**{m.item.raw_name}**")
+                head.caption(f"검색어 `{m.item.search_term}` · {m.item.quantity:,}개 요청")
+
+                if m.status == matching.CHOICE:
+                    body.warning(f"비슷한 상품이 {len(m.candidates)}개 있습니다. 하나를 고르세요.")
+                    labels = ["(선택하세요)"] + [
+                        f"{c['product_id']} · {c['product_name']} · "
+                        f"{int(c['unit_price']):,} ₫ · 재고 {int(c['stock_quantity']):,}"
+                        for c in m.candidates]
+                    picked = body.selectbox("상품 선택", labels, key=f"choice_{idx}",
+                                            label_visibility="collapsed")
+                    if picked != "(선택하세요)":
+                        m = matching.choose(m, picked.split(" · ")[0])
+
+                if m.status == matching.NOT_FOUND:
+                    body.error("**확인 필요** — 시트에서 이 상품을 찾지 못했습니다. "
+                               "상품을 시트에 추가하거나 고객에게 정확한 품명을 확인하세요.")
+                    if m.candidates:
+                        body.caption("이름이 비슷한 상품 (참고용, 자동 선택하지 않음): "
+                                     + ", ".join(c["product_name"] for c in m.candidates))
+                elif m.status == matching.MATCHED:
+                    p = m.product
+                    body.markdown(f"→ **{p['product_name']}** (`{p['product_id']}`)")
+                    k1, k2, k3 = body.columns(3)
+                    k1.metric("단가 (세전)", f"{int(p['unit_price']):,} ₫")
+                    k2.metric("재고", f"{int(p['stock_quantity']):,}개")
+                    k3.metric("재고 상태", STOCK_LABEL[m.stock_status])
+                    if m.shortage:
+                        body.warning(f"**{m.shortage:,}개 부족** — 요청 {m.item.quantity:,}개 / "
+                                     f"재고 {int(p['stock_quantity']):,}개. "
+                                     f"이 부족분은 견적서에도 표시됩니다.")
+            resolved.append(m)
+
+        st.session_state["matches"] = resolved
+        pending = matching.unresolved(resolved)
+        short = [m for m in resolved if m.shortage]
+        c1, c2, c3 = st.columns(3)
+        c1.metric("확정된 상품", f"{len(resolved) - len(pending)} / {len(resolved)}")
+        c2.metric("재고 부족·품절", f"{len(short)}건")
+        c3.metric("처리 필요", f"{len(pending)}건")
+
+        if pending:
+            st.warning(f"**{len(pending)}건이 미확정입니다.** 상품을 고르거나 확인해야 "
+                       f"다음 단계(가격 계산)로 넘어갈 수 있습니다.")
+        else:
+            st.success("모든 상품이 확정되었습니다. 다음 단계(6단계)에서 금액을 계산합니다.")
+
+elif page == "Product Search":
+    st.header("Product Search")
+    st.caption("견적 작성 중에 상품을 직접 확인할 때 쓰는 화면입니다. "
+               "검색어의 모든 단어가 상품명에 들어있는 상품을 찾습니다 (대소문자·순서 무관).")
+    term = st.text_input("검색어", placeholder="Monitor / Wireless Mouse / A4 Paper / 의자")
+    if term:
+        found = matching.search(data.products, term, limit=20)
+        if found:
+            st.dataframe(
+                [{"ID": p["product_id"], "상품명": p["product_name"], "분류": p["category"],
+                  "단가 (VND, 세전)": f"{int(p['unit_price']):,}",
+                  "재고": f"{int(p['stock_quantity']):,}"} for p in found],
+                hide_index=True, width="stretch")
+            st.caption(f"{len(found)}건. 단종(active=FALSE) 상품은 제외됩니다.")
+        else:
+            st.info("찾지 못했습니다. 영어 품명으로 검색해 보세요 (시트의 상품명이 영어입니다).")
 
 else:
     st.header(page)
     st.info("아직 구현 전입니다. 다음 단계에서 채웁니다.")
-    st.caption({
-        "Product Search": "5단계: 상품명 유사 검색과 재고 확인",
-        "Quotation Preview": "8단계: PDF 미리보기·다운로드, 이메일 초안",
-    }[page])
+    st.caption("8단계: PDF 미리보기·다운로드, 이메일 초안")
