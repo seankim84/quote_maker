@@ -2,7 +2,7 @@
 
 import streamlit as st
 
-from core import config, sheets
+from core import config, extract, sheets
 
 st.set_page_config(page_title="AI Quote Factory", page_icon="📄", layout="wide")
 
@@ -106,11 +106,67 @@ elif page == "Settings / Connection":
             "탭 이름은 대소문자를 구분하지 않습니다 (`products` / `Products` 모두 인식)."
         )
 
+elif page == "New Quotation":
+    st.header("New Quotation")
+
+    done = "extraction" in st.session_state
+    stages = ["고객 문의 입력", "AI 요청 분석", "상품 자동 매칭",
+              "가격·재고 확인", "견적 검토", "PDF 다운로드"]
+    st.caption(" → ".join(f"{'✅' if i < (2 if done else 0) else '⬜'} {name}"
+                          for i, name in enumerate(stages)))
+    st.divider()
+
+    st.subheader("1. 고객 문의 입력")
+    inquiry = st.text_area(
+        "고객이 보낸 메일이나 메시지를 그대로 붙여넣으세요.",
+        height=160, key="inquiry",
+        placeholder="안녕하세요. 모니터 20대, 키보드 30개, 무선 마우스 30개가 필요합니다.\n"
+                    "다음 주까지 납품 가능한지 확인해 주시고 견적 부탁드립니다.",
+    )
+    if st.button("🤖 AI 로 분석하기", type="primary"):
+        try:
+            with st.spinner("문의 내용을 분석하는 중…"):
+                st.session_state["extraction"] = extract.extract(inquiry)
+        except extract.ExtractError as e:
+            st.session_state.pop("extraction", None)
+            st.error(str(e))
+
+    result = st.session_state.get("extraction")
+    if result:
+        st.divider()
+        st.subheader("2. AI 요청 분석 결과")
+        if result.source == "mock":
+            st.warning("🧪 **Mock 결과입니다.** 실제 Claude API 가 아니라 단순 키워드 규칙으로 "
+                       "추출했습니다. 실무 견적에 쓰지 마세요.")
+        else:
+            st.success(f"🟢 Claude API ({extract.MODEL}) 분석 결과")
+
+        if result.items:
+            st.dataframe(
+                [{"고객 표현": i.raw_name, "검색어": i.search_term, "수량": i.quantity}
+                 for i in result.items],
+                hide_index=True, width="stretch",
+            )
+        else:
+            st.info("문의 내용에서 상품 요청을 찾지 못했습니다. 상품명과 수량이 포함돼 있는지 확인하세요.")
+
+        c1, c2 = st.columns(2)
+        c1.metric("요청 납기 (고객 표현 그대로)", result.requested_delivery or "언급 없음")
+        c2.metric("추출된 품목", f"{len(result.items)}건")
+        if result.notes:
+            st.write("**기타 요구사항** —", result.notes)
+        for w in result.warnings:
+            st.warning(w)
+
+        st.info("⚠️ 납기일은 **확정된 것이 아닙니다.** 위 표현은 고객이 쓴 문장을 그대로 옮긴 것이며, "
+                "재고 정보만으로 납품일을 보장할 수 없습니다.")
+        st.caption("다음 단계(5단계)에서 이 검색어로 시트의 실제 상품을 찾아 매칭합니다. "
+                   "상품과 가격은 Google Sheets 에만 존재하며 AI 가 만들어내지 않습니다.")
+
 else:
     st.header(page)
     st.info("아직 구현 전입니다. 다음 단계에서 채웁니다.")
     st.caption({
-        "New Quotation": "4~7단계: 문의 입력 → AI 분석 → 상품 매칭 → 재고/가격 → 검토",
         "Product Search": "5단계: 상품명 유사 검색과 재고 확인",
         "Quotation Preview": "8단계: PDF 미리보기·다운로드, 이메일 초안",
     }[page])

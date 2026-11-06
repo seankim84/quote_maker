@@ -59,8 +59,8 @@ streamlit run app.py
 - [x] 1. 프로젝트 초기화 및 폴더 구조
 - [x] **2. 가상 데이터 CSV + Google Sheets 구조 설계** — `data/SHEET_SETUP.md`
 - [x] **3. Google Sheets 연결** (`core/sheets.py`) — Dashboard 에 실데이터 표시
-- [ ] **4. 고객 문의 AI 구조화** (`core/extract.py`, Mock 포함) ← 다음
-- [ ] 5. 상품 매칭 및 재고 확인 (`core/matching.py`)
+- [x] **4. 고객 문의 AI 구조화** (`core/extract.py`, Mock 포함)
+- [ ] **5. 상품 매칭 및 재고 확인** (`core/matching.py`) ← 다음
 - [ ] 6. 가격 계산 (`core/pricing.py`)
 - [ ] 7. 견적 검토 화면
 - [ ] 8. PDF 생성 + 이메일 초안 (`core/pdf.py`, `core/email_draft.py`)
