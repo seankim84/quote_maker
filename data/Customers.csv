@@ -1,9 +1,9 @@
 customer_id,company_name,contact_name,email,customer_tier,discount_rate
-C001,"Saigon Tech Solutions Co., Ltd.",Nguyen Van Minh,minh.nguyen@saigontech.vn,VIP,0.10
-C002,Hanoi Office Supplies JSC,Tran Thi Lan,lan.tran@hanoioffice.vn,Gold,0.07
-C003,"Daewoo Vina Co., Ltd.",김재훈,jh.kim@daewoovina.com.vn,VIP,0.10
-C004,"Mekong Logistics Co., Ltd.",Le Hoang Nam,nam.le@mekonglog.vn,Silver,0.03
-C005,Bình Dương Garment JSC,Phạm Thị Hương,huong.pham@bdgarment.vn,Gold,0.07
-C006,FPT Software Danang Branch,Vu Quang Huy,huy.vu@fptsw.vn,Silver,0.03
-C007,Lotte Mart Vietnam,박민서,ms.park@lottemart.vn,VIP,0.10
-C008,Can Tho Trading Co.,Dang Van Tuan,tuan.dang@canthotrading.vn,Standard,0.00
+C001,"Demo Tech Solutions Co., Ltd.",Nguyễn Văn A,demo.c001@example.com,VIP,0.10
+C002,Sample Office Supplies JSC,Trần Thị B,demo.c002@example.com,Gold,0.07
+C003,"Example Vina Co., Ltd.",김민준,demo.c003@example.com,VIP,0.10
+C004,"Test Logistics Co., Ltd.",Lê Hoàng C,demo.c004@example.com,Silver,0.03
+C005,Bình Dương Sample Garment JSC,Phạm Thị Hương,demo.c005@example.com,Gold,0.07
+C006,Demo Software Đà Nẵng Branch,Đặng Hữu Dũng,demo.c006@example.com,Silver,0.03
+C007,Sample Mart Vietnam,박서연,demo.c007@example.com,VIP,0.10
+C008,Example Trading Co.,Vũ Quỳnh Chi,demo.c008@example.com,Standard,0.00

@@ -186,9 +186,11 @@ def generate_mock(quote, customer, settings, meta, number, language) -> Draft:
 
 
 def generate(quote, customer: dict, settings: dict, meta: dict, number: str,
-             language: str) -> Draft:
+             language: str, mock: bool | None = None) -> Draft:
+    """mock=None 이면 config 가 결정하고, True/False 면 호출자가 강제합니다."""
     if language not in LANGUAGES:
         raise DraftError(f"지원하지 않는 언어입니다: {language!r} "
                          f"(가능: {', '.join(LANGUAGES)})")
     args = (quote, customer, settings, meta, number, language)
-    return generate_mock(*args) if config.mock_mode() else generate_with_claude(*args)
+    use_mock = config.mock_mode() if mock is None else mock
+    return generate_mock(*args) if use_mock else generate_with_claude(*args)

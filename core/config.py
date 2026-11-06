@@ -1,5 +1,6 @@
 """환경 설정 읽기. 값은 .env 에서만 오고, 코드에 키를 적지 않습니다."""
 
+import json
 import os
 from pathlib import Path
 
@@ -25,6 +26,21 @@ def sheet_id() -> str:
 
 def credentials_path() -> Path:
     return ROOT / os.getenv("GOOGLE_CREDENTIALS_FILE", "credentials.json")
+
+
+def credentials_info() -> dict | None:
+    """GOOGLE_CREDENTIALS_JSON 에 담긴 서비스 계정 정보. 배포 환경에서 파일 대신 씁니다.
+    실패해도 내용(키)을 예외 메시지에 넣지 않습니다."""
+    raw = (os.getenv("GOOGLE_CREDENTIALS_JSON") or "").strip()
+    if not raw:
+        return None
+    try:
+        info = json.loads(raw)
+    except json.JSONDecodeError:
+        raise ValueError("GOOGLE_CREDENTIALS_JSON 이 올바른 JSON 이 아닙니다.") from None
+    if not isinstance(info, dict) or "client_email" not in info:
+        raise ValueError("GOOGLE_CREDENTIALS_JSON 에 서비스 계정 정보가 없습니다.")
+    return info
 
 
 def force_mock() -> bool:

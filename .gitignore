@@ -10,3 +10,6 @@ __pycache__/
 .DS_Store
 out/
 *.pdf
+
+# Streamlit 배포 설정 (실제 비밀값)
+.streamlit/secrets.toml

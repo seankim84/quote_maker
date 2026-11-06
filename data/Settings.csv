@@ -1,7 +1,7 @@
 key,value
-company_name,"ANB Office Solutions Co., Ltd."
-company_address,"123 Nguyễn Huệ, District 1, Ho Chi Minh City, Vietnam"
-company_email,sales@anb-office.vn
+company_name,"Demo Office Solutions Co., Ltd."
+company_address,"123 Demo Street, District 1, Hồ Chí Minh City, Việt Nam"
+company_email,sales@example.com
 quotation_valid_days,14
 default_currency,VND
 tax_rate,0.10

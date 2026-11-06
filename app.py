@@ -1,11 +1,23 @@
 """AI Quote Factory — Streamlit UI 전용. 비즈니스 로직은 core/ 에 둡니다."""
 
+import os
 from datetime import date, timedelta
 
 import pandas as pd
 import streamlit as st
 
-from core import config, email_draft, extract, matching, pdf, pricing, sheets
+from core import (config, email_draft, extract, matching, pdf, pricing,
+                  quota, sheets)
+
+# Streamlit Cloud 에는 .env 파일이 없습니다. Secrets 를 환경변수로 넘겨
+# core/ 가 streamlit 을 모르는 상태를 유지합니다. 로컬 .env 가 우선입니다.
+for _key in ("ANTHROPIC_API_KEY", "GOOGLE_SHEET_ID", "GOOGLE_CREDENTIALS_JSON",
+             "FORCE_MOCK", "QUOTA_PER_SESSION", "QUOTA_PER_DAY"):
+    try:
+        if _key in st.secrets:
+            os.environ.setdefault(_key, str(st.secrets[_key]))
+    except Exception:
+        pass   # secrets.toml 이 없는 로컬 환경
 
 st.set_page_config(page_title="AI Quote Factory", page_icon="📄", layout="wide")
 
@@ -32,6 +44,25 @@ def recall(name, default=None):
     return st.session_state.get(f"saved_{name}", default)
 
 
+@st.cache_resource
+def day_counter():
+    """프로세스 전체가 공유하는 하루 호출 수 (모든 방문자 합산)."""
+    return quota.DayCounter()
+
+
+def ai_allowed():
+    """상한을 넘겼으면 (False, 사유). 넘기지 않았으면 (True, "")."""
+    if config.mock_mode():
+        return True, ""        # 이미 Mock 이면 상한과 무관
+    return quota.check(st.session_state.get("ai_calls", 0),
+                       day_counter().current(), quota.limits_from_env())
+
+
+def record_ai_call():
+    st.session_state["ai_calls"] = st.session_state.get("ai_calls", 0) + 1
+    day_counter().record()
+
+
 @st.cache_data(ttl=300, show_spinner="Google Sheets 읽는 중…")
 def load_sheet():
     """5분 캐시. 시트를 고쳤으면 사이드바의 '새로 읽기' 를 누르세요."""
@@ -47,6 +78,12 @@ with st.sidebar:
         st.warning("🧪 Mock 모드\nClaude API 를 호출하지 않습니다.")
     else:
         st.success("🟢 실제 Claude API 연결")
+    if not config.mock_mode():
+        lim = quota.limits_from_env()
+        if lim.per_session or lim.per_day:
+            st.caption(f"AI 호출 — 이 세션 {st.session_state.get('ai_calls', 0)}"
+                       f"/{lim.per_session or '∞'} · 오늘 전체 "
+                       f"{day_counter().current()}/{lim.per_day or '∞'}")
     if st.button("🔄 시트 새로 읽기", width="stretch"):
         load_sheet.clear()
         st.rerun()
@@ -155,9 +192,15 @@ elif page == "New Quotation":
     )
     remember("inquiry", inquiry)
     if st.button("🤖 AI 로 분석하기", type="primary"):
+        allowed, reason = ai_allowed()
+        # rerun 하면 화면이 다시 그려지므로 사유를 세션에 남겨야 사라지지 않습니다.
+        st.session_state["quota_notice"] = "" if allowed else reason
         try:
             with st.spinner("문의 내용을 분석하는 중…"):
-                st.session_state["extraction"] = extract.extract(inquiry)
+                st.session_state["extraction"] = extract.extract(
+                    inquiry, mock=None if allowed else True)
+            if allowed and not config.mock_mode():
+                record_ai_call()
             # 이전 문의의 흔적이 새 견적에 섞이지 않도록 모두 비웁니다.
             # 특히 draft/pdf_bytes 를 남기면 다른 고객에게 보낼 초안이 화면에 남습니다.
             for key in [k for k in st.session_state if str(k).startswith("choice_")] + [
@@ -169,14 +212,20 @@ elif page == "New Quotation":
         except extract.ExtractError as e:
             st.session_state.pop("extraction", None)
             st.error(str(e))
+        else:
+            # 사이드바는 버튼 처리보다 먼저 실행되므로, 갱신된 호출 수를 보여주려면
+            # 한 번 다시 그려야 합니다.
+            st.rerun()
 
     result = st.session_state.get("extraction")
     if result:
         st.divider()
         st.subheader("2. AI 요청 분석 결과")
         if result.source == "mock":
+            notice = st.session_state.get("quota_notice")
             st.warning("🧪 **Mock 결과입니다.** 실제 Claude API 가 아니라 단순 키워드 규칙으로 "
-                       "추출했습니다. 실무 견적에 쓰지 마세요.")
+                       "추출했습니다. 실무 견적에 쓰지 마세요."
+                       + (f"\n\n사유: {notice}" if notice else ""))
         else:
             st.success(f"🟢 Claude API ({extract.MODEL}) 분석 결과")
 
@@ -478,14 +527,21 @@ else:   # Quotation Preview
     language = next(k for k, v in email_draft.LANGUAGES.items() if v == lang_label)
 
     if st.button("✉️ 이메일 초안 만들기"):
+        allowed, reason = ai_allowed()
+        st.session_state["quota_notice"] = "" if allowed else reason
         try:
             with st.spinner("초안을 작성하는 중…"):
                 st.session_state["draft"] = email_draft.generate(
-                    quote, customer, data.settings, meta, number, language)
+                    quote, customer, data.settings, meta, number, language,
+                    mock=None if allowed else True)
                 st.session_state["draft_for"] = fingerprint
+            if allowed and not config.mock_mode():
+                record_ai_call()
         except email_draft.DraftError as e:
             st.session_state.pop("draft", None)
             st.error(str(e))
+        else:
+            st.rerun()   # 사이드바 호출 수 갱신
 
     draft = st.session_state.get("draft")
     if draft and st.session_state.get("draft_for") != fingerprint:
@@ -497,8 +553,10 @@ else:   # Quotation Preview
                    "초안을 다시 만들어 주세요.")
     if draft:
         if draft.source == "mock":
+            notice = st.session_state.get("quota_notice")
             st.warning("🧪 **Mock 초안입니다.** 고정 템플릿으로 만들었습니다. "
-                       "실제 Claude 가 쓴 문장이 아닙니다.")
+                       "실제 Claude 가 쓴 문장이 아닙니다."
+                       + (f"\n\n사유: {notice}" if notice else ""))
         else:
             st.success(f"🟢 Claude API ({email_draft.MODEL}) 가 작성한 초안 "
                        f"· {email_draft.LANGUAGES[draft.language]}")

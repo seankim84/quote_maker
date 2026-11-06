@@ -60,11 +60,15 @@ streamlit run app.py
 각 후보는 실제로 한글·베트남어 글자를 담고 있는지 검사한 뒤 채택됩니다. 없으면 PDF 생성을
 중단하고 안내합니다 — 글자가 깨진 견적서를 내보내지 않습니다.
 
-⚠️ **배포(10단계) 전에 OFL 폰트(예: Noto Sans KR)를 `assets/` 에 넣어야 합니다.**
-Streamlit Cloud 는 Linux 라서 macOS 폰트가 없습니다.
+`assets/NotoSansKR.ttf` (OFL, 10MB) 를 번들로 포함했습니다 — Linux 배포 환경에도 한글·베트남어가
+나옵니다. 라이선스는 `assets/FONT_LICENSE.md` 참고.
 
 ### 로고
 `assets/logo.png` 를 넣으면 견적서 머리말에 들어갑니다. 없으면 회사명 텍스트로 대체됩니다.
+
+⚠️ **로고는 긴 변 1200px 정도로 줄여서 넣으세요.** 원본을 그대로 임베드하므로
+7500px 로고를 쓰면 PDF 가 220KB·0.8초가 됩니다 (1200px 면 36KB·0.1초).
+원본은 `assets/logo_source.png` 에 보관해 뒀습니다.
 
 ### 견적 번호
 `Q20261106-A1B2` 형식. **뒤 4자리가 난수라 드물게 중복될 수 있는 데모용**입니다.
@@ -99,6 +103,18 @@ Streamlit Cloud 는 Linux 라서 macOS 폰트가 없습니다.
 
 실제 API·시트를 쓰는 확인은 수동 스크립트로만 합니다 (저장소에 포함하지 않음).
 
+## 배포 (공개 URL)
+
+`DEPLOY.md` 참고. 요약:
+
+- Streamlit Community Cloud 무료 (유료 플랜 없음)
+- `.env` 대신 **Streamlit Secrets** 사용 — `.streamlit/secrets.toml.example` 참고
+- 서비스 계정은 파일 대신 `GOOGLE_CREDENTIALS_JSON` 환경변수로
+- **공개 앱은 AI 호출 상한이 필수**: 세션당 10회 / 하루 200회 (`QUOTA_PER_*`).
+  상한 초과 시 거부가 아니라 **Mock 으로 내려가고 사유를 표시**합니다
+- ⚠️ 공개 URL 에는 **가상 데모 데이터만** 올립니다. 실제 거래처 정보를 넣은 뒤에는
+  공개하지 말고 비공개 앱(무료 1개) + 뷰어 허용 목록을 쓰세요
+
 ## 안전 규칙
 
 - API 키는 `.env` 에만. `.env` 와 `credentials.json` 은 `.gitignore` 에 등록됨
@@ -118,4 +134,4 @@ Streamlit Cloud 는 Linux 라서 macOS 폰트가 없습니다.
 - [x] **7. 견적 검토 화면**
 - [x] **8. PDF 생성 + 이메일 초안** (`core/pdf.py`, `core/email_draft.py`)
 - [x] **9. 오류 처리와 전체 테스트**
-- [ ] **10. 배포 준비** ← 다음
+- [x] **10. 배포 준비** — `DEPLOY.md`

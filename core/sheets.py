@@ -115,13 +115,19 @@ def parse_settings(rows: list[list[str]]) -> dict[str, str]:
 
 def load_all() -> SheetData:
     """시트 전체를 한 번에 읽습니다. 호출할 때마다 API 를 쓰므로 UI 에서 캐시하세요."""
-    creds = config.credentials_path()
-    if not creds.is_file():
-        raise SheetError(f"서비스 계정 파일이 없습니다: {creds.name} (.env 의 GOOGLE_CREDENTIALS_FILE 확인)")
-    if not config.sheet_id():
-        raise SheetError(".env 에 GOOGLE_SHEET_ID 가 비어 있습니다.")
     try:
-        client = gspread.service_account(filename=str(creds))
+        info = config.credentials_info()
+    except ValueError as e:
+        raise SheetError(str(e)) from None
+    creds = config.credentials_path()
+    if info is None and not creds.is_file():
+        raise SheetError(f"서비스 계정 정보가 없습니다. 로컬은 {creds.name} 파일, "
+                         f"배포 환경은 GOOGLE_CREDENTIALS_JSON 설정이 필요합니다.")
+    if not config.sheet_id():
+        raise SheetError("GOOGLE_SHEET_ID 가 비어 있습니다.")
+    try:
+        client = (gspread.service_account_from_dict(info) if info
+                  else gspread.service_account(filename=str(creds)))
         book = client.open_by_key(config.sheet_id())
         tabs = {ws.title.strip().lower(): ws for ws in book.worksheets()}
     except gspread.exceptions.APIError as e:

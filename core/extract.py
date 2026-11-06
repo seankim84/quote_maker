@@ -202,7 +202,9 @@ def extract_mock(text: str) -> Extraction:
         "Mock 모드입니다. 단순 키워드 규칙으로 추출했으므로 실제 Claude 결과와 다릅니다."])
 
 
-def extract(text: str) -> Extraction:
-    """진입점. Mock 여부는 config 가 결정합니다."""
+def extract(text: str, mock: bool | None = None) -> Extraction:
+    """진입점. mock=None 이면 config 가 결정하고, True/False 면 호출자가 강제합니다.
+    (공개 배포에서 호출 상한을 넘겼을 때 Mock 으로 내리기 위해 필요합니다.)"""
     text = check_input(text)
-    return extract_mock(text) if config.mock_mode() else extract_with_claude(text)
+    use_mock = config.mock_mode() if mock is None else mock
+    return extract_mock(text) if use_mock else extract_with_claude(text)
